@@ -1,4 +1,4 @@
-# Client.py - VERSIÓN SIMPLIFICADA PARA IMÁGENES
+# Client.py - VERSIÓN COMPLETA CORREGIDA
 import socket
 import json
 import tkinter as tk
@@ -6,8 +6,9 @@ from tkinter import ttk, messagebox, filedialog
 import base64
 from PIL import Image, ImageTk
 import io
-import os
 import hashlib
+
+from core.MergeSort import MergeSorter
 
 class SocialTecClient:
     def __init__(self, root):
@@ -18,6 +19,7 @@ class SocialTecClient:
         self.server_host = "127.0.0.1"
         self.server_port = 5000
         self.current_user = None
+        self.sorter = MergeSorter()  # Para ordenar amigos con Merge Sort
         
         # Conectar al servidor
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -31,19 +33,6 @@ class SocialTecClient:
         
         self.create_gui()
         self.show_login()
-    
-    def do_login(self):
-        username = self.login_username.get().strip()
-        password = self.login_password.get().strip()
-        
-        # HASH SHA-256 ANTES DE ENVIAR
-        password_hashed = hashlib.sha256(password.encode()).hexdigest()
-        
-        request = {
-            "type": "login",
-            "username": username,
-            "password": password_hashed  # Enviar hash, no texto plano
-        }
     
     def send_request(self, request):
         """Enviar petición al servidor"""
@@ -97,12 +86,8 @@ class SocialTecClient:
         self.load_friend_requests()
         self.load_all_users()
     
-    # ============================================
-    # SECCIÓN CRÍTICA: SOLUCIÓN SIMPLE PARA IMÁGENES
-    # ============================================
-    
     def load_profile(self):
-        """Cargar perfil del usuario - VERSIÓN SIMPLE"""
+        """Cargar perfil del usuario"""
         if not self.current_user:
             return
         
@@ -115,15 +100,12 @@ class SocialTecClient:
         if response and response.get("status") == "ok":
             profile = response.get("profile", {})
             
-            # Actualizar título
             self.profile_title.config(
                 text=f"{profile.get('nombre')} {profile.get('apellido')}"
             )
             
-            # **SIMPLE: Mostrar foto o texto "Sin foto"**
             foto = profile.get("foto", "")
             
-            # LIMPIAR siempre la imagen anterior
             self.profile_photo_label.config(image='', text='')
             
             if foto:
@@ -133,16 +115,14 @@ class SocialTecClient:
                     img.thumbnail((120, 120))
                     photo_img = ImageTk.PhotoImage(img)
                     self.profile_photo_label.config(image=photo_img)
-                    self.profile_photo_label.image = photo_img  # Guardar referencia
+                    self.profile_photo_label.image = photo_img
                 except Exception as e:
-                    # Si falla, mostrar texto
                     self.profile_photo_label.config(
                         text="❌\nError foto", 
                         font=("Arial", 10),
                         fg="red"
                     )
             else:
-                # Sin foto - mostrar texto simple
                 self.profile_photo_label.config(
                     text="📷\nSin foto", 
                     font=("Arial", 12),
@@ -152,20 +132,22 @@ class SocialTecClient:
                     height=8
                 )
             
-            # Mostrar información
             info_text = f"👤 Usuario: {profile.get('username')}\n\n"
             info_text += f"📝 {profile.get('bio', '')}\n\n"
             info_text += f"🤝 Amigos: {profile.get('friends_count', 0)}"
             
             self.profile_info.config(text=info_text)
             
-            # Mostrar lista de amigos
+            # Ordenar amigos con Merge Sort
+            amigos = profile.get("amigos", [])
+            amigos_ordenados = self.sorter.sort(amigos)
+            
             self.friends_listbox.delete(0, tk.END)
-            for friend in profile.get("amigos", []):
+            for friend in amigos_ordenados:
                 self.friends_listbox.insert(tk.END, f"• {friend}")
     
     def view_searched_profile(self):
-        """Ver perfil del usuario seleccionado - VERSIÓN SIMPLE"""
+        """Ver perfil del usuario seleccionado"""
         selection = self.search_results.curselection()
         if not selection:
             messagebox.showwarning("Advertencia", "Seleccione un usuario")
@@ -183,12 +165,10 @@ class SocialTecClient:
         if response and response.get("status") == "ok":
             profile = response.get("profile", {})
             
-            # Crear ventana emergente SIMPLE
             profile_window = tk.Toplevel(self.root)
             profile_window.title(f"Perfil de {username}")
             profile_window.geometry("400x400")
             
-            # Foto o texto simple
             foto_frame = tk.Frame(profile_window)
             foto_frame.pack(pady=20)
             
@@ -215,7 +195,6 @@ class SocialTecClient:
             
             foto_label.pack()
             
-            # Información
             info = f"👤 {profile.get('nombre')} {profile.get('apellido')}\n\n"
             info += f"📝 {profile.get('bio', 'Sin biografía')}\n\n"
             info += f"🤝 {profile.get('friends_count', 0)} amigos\n"
@@ -224,13 +203,8 @@ class SocialTecClient:
             info_label = tk.Label(profile_window, text=info, font=("Arial", 11), justify="left")
             info_label.pack(pady=20)
             
-            # Botón cerrar
             tk.Button(profile_window, text="Cerrar", 
                      command=profile_window.destroy).pack(pady=10)
-    
-    # ============================================
-    # EL RESTO DEL CÓDIGO SE MANTIENE IGUAL
-    # ============================================
     
     def create_login_tab(self):
         """Crear pestaña de login"""
@@ -270,7 +244,7 @@ class SocialTecClient:
         return frame
     
     def do_login(self):
-        """Realizar login - ENVÍO TEXTO PLANO (PASSLIB LO HASHEA)"""
+        """Realizar login - CON ENCRIPTACIÓN SHA-256"""
         username = self.login_username.get().strip()
         password = self.login_password.get().strip()
         
@@ -278,10 +252,13 @@ class SocialTecClient:
             messagebox.showwarning("Advertencia", "Por favor complete todos los campos")
             return
         
+        # ENCRIPTAR CON SHA-256
+        password_hash = hashlib.sha256(password.encode()).hexdigest()
+        
         request = {
             "type": "login",
             "username": username,
-            "password": password  # TEXTO PLANO - PASSLIB LO HASHEA EN EL SERVER
+            "password": password_hash  # ¡ENVIAR HASH!
         }
         
         response = self.send_request(request)
@@ -374,7 +351,7 @@ class SocialTecClient:
                 messagebox.showerror("Error", f"No se pudo cargar la imagen: {str(e)}")
     
     def do_register(self):
-        """Realizar registro - ENVÍO TEXTO PLANO"""
+        """Realizar registro - CON ENCRIPTACIÓN SHA-256"""
         username = self.reg_fields["username"].get().strip()
         password = self.reg_fields["password"].get().strip()
         confirm_password = self.reg_fields["confirm"].get().strip()
@@ -390,10 +367,13 @@ class SocialTecClient:
             messagebox.showerror("Error", "Las contraseñas no coinciden")
             return
         
+        # ENCRIPTAR CON SHA-256
+        password_hash = hashlib.sha256(password.encode()).hexdigest()
+        
         request = {
             "type": "register",
             "username": username,
-            "password": password,  # TEXTO PLANO - PASSLIB LO HASHEA EN EL SERVER
+            "password": password_hash,  # ¡ENVIAR HASH!
             "nombre": nombre,
             "apellido": apellido,
             "foto": foto
@@ -431,7 +411,6 @@ class SocialTecClient:
         info_frame = tk.Frame(content_frame)
         info_frame.pack(fill="x", pady=(0, 20))
         
-        # LABEL PARA FOTO - CONFIGURADO PARA MOSTRAR TEXTO SI NO HAY IMAGEN
         self.profile_photo_label = tk.Label(info_frame, 
                                            relief="solid", 
                                            borderwidth=1,

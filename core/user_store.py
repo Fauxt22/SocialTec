@@ -5,11 +5,10 @@ from passlib.hash import sha256_crypt
 class UserStore:
     def __init__(self):
         self.users = {}
-        self.friend_requests = {}  # Para usuario: [solicitudes recibidas]
+        self.friend_requests = {}
         self._load()
     
     def _load(self):
-        # Crear directorio data si no existe
         os.makedirs("data", exist_ok=True)
         
         if os.path.exists("data/users.dat"):
@@ -27,7 +26,6 @@ class UserStore:
             self.friend_requests = {}
     
     def _save(self):
-        # Crear directorio si no existe
         os.makedirs("data", exist_ok=True)
         
         data = {
@@ -37,22 +35,24 @@ class UserStore:
         with open("data/users.dat", "wb") as f:
             pickle.dump(data, f)
     
-    def register(self, username, nombre, apellido, foto, password):
+    def register(self, username, nombre, apellido, foto, password_hash):
+        """Registrar usuario - recibe password_hash (SHA-256)"""
         username = username.strip()
-        if not username or not password:
+        if not username or not password_hash:
             return False, "Faltan datos"
         
         if username in self.users:
             return False, "Usuario ya existe"
         
-        hashed = sha256_crypt.hash(password)
+        # Hashear el hash SHA-256 con Passlib
+        hashed = sha256_crypt.hash(password_hash)
         
         self.users[username] = {
             "username": username,
             "nombre": nombre,
             "apellido": apellido,
             "foto": foto,
-            "password": hashed,
+            "password": hashed,  # Passlib hash del SHA-256
             "bio": "¡Hola! Soy nuevo en SocialTec 🌟",
             "created_at": "2024"
         }
@@ -62,13 +62,15 @@ class UserStore:
         self._save()
         return True, None
     
-    def login(self, username, password):
+    def login(self, username, password_hash):
+        """Login - verifica el hash SHA-256 con Passlib"""
         username = username.strip()
         
         if username not in self.users:
             return False, "Usuario no existe"
         
-        if not sha256_crypt.verify(password, self.users[username]["password"]):
+        # Verificar el hash SHA-256 con Passlib
+        if not sha256_crypt.verify(password_hash, self.users[username]["password"]):
             return False, "Contraseña incorrecta"
         
         return True, None
@@ -92,7 +94,6 @@ class UserStore:
         if to_user not in self.friend_requests:
             self.friend_requests[to_user] = []
         
-        # Verificar si ya hay solicitud pendiente
         if from_user in self.friend_requests[to_user]:
             return False, "Ya enviaste una solicitud"
         

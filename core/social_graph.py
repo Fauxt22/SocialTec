@@ -8,7 +8,6 @@ class SocialGraph:
         self._load()
     
     def _load(self):
-        # Crear directorio data si no existe
         os.makedirs("data", exist_ok=True)
         
         if os.path.exists("data/graph.dat"):
@@ -22,7 +21,6 @@ class SocialGraph:
             self.adj = {}
     
     def _save(self):
-        # Crear directorio si no existe
         os.makedirs("data", exist_ok=True)
         
         with open("data/graph.dat", "wb") as f:
@@ -59,24 +57,21 @@ class SocialGraph:
         return list(self.adj.get(username, set()))
     
     def path_bfs(self, start, goal):
-        """BFS para encontrar camino entre usuarios - IMPLEMENTACIÓN CORRECTA"""
+        """BFS para encontrar camino entre usuarios"""
         if start not in self.adj or goal not in self.adj:
             return None
         
         if start == goal:
             return [start]
         
-        # Usar deque para BFS eficiente
         queue = deque()
         queue.append(start)
         
-        # Diccionario para reconstruir el camino
         came_from = {start: None}
         
         while queue:
             current = queue.popleft()
             
-            # Si encontramos el objetivo, reconstruir camino
             if current == goal:
                 path = []
                 while current is not None:
@@ -85,7 +80,6 @@ class SocialGraph:
                 path.reverse()
                 return path
             
-            # Explorar amigos
             for friend in self.adj.get(current, set()):
                 if friend not in came_from:
                     came_from[friend] = current
@@ -93,40 +87,43 @@ class SocialGraph:
         
         return None
     
-    def stats(self, users):
-        """Obtener estadísticas: usuario con más/menos amigos, promedio - VERSIÓN CORREGIDA"""
-        users = list(users or [])
+    def stats(self):
+        """Obtener estadísticas: usuario con más/menos amigos, promedio - VERSIÓN MEJORADA"""
+        users = list(self.adj.keys())
         
         if not users:
-            return {"max": {"username": "N/A", "count": 0}, 
-                    "min": {"username": "N/A", "count": 0}, 
-                    "avg": 0.0}
+            return {"max": {"usernames": [], "count": 0}, 
+                    "min": {"usernames": [], "count": 0}, 
+                    "avg": 0}
         
-        # Calcular número de amigos para cada usuario
         degrees = {}
-        for u in users:
-            friends = self.adj.get(u, set())
-            degrees[u] = len(friends)
+        for user in users:
+            degrees[user] = len(self.adj.get(user, set()))
         
-        # Encontrar usuario con MÁS amigos
-        if degrees:
-            max_u = max(degrees.keys(), key=lambda u: degrees[u])
-            min_u = min(degrees.keys(), key=lambda u: degrees[u])
-        else:
-            max_u = min_u = users[0] if users else "N/A"
+        if not degrees:
+            return {"max": {"usernames": [], "count": 0}, 
+                    "min": {"usernames": [], "count": 0}, 
+                    "avg": 0}
         
-        # Calcular promedio
-        total_friends = sum(degrees.values())
-        avg_friends = total_friends / len(users) if users else 0
+        # Encontrar máximo y mínimo con todos los empates
+        max_count = max(degrees.values())
+        min_count = min(degrees.values())
+        
+        # Recolectar TODOS los usuarios con máximo y mínimo
+        max_users = [user for user, count in degrees.items() if count == max_count]
+        min_users = [user for user, count in degrees.items() if count == min_count]
+        
+        # Promedio
+        avg = sum(degrees.values()) / len(degrees)
         
         return {
-            "max": {"username": max_u, "count": degrees.get(max_u, 0)},
-            "min": {"username": min_u, "count": degrees.get(min_u, 0)},
-            "avg": round(avg_friends, 2)
+            "max": {"usernames": max_users, "count": max_count},
+            "min": {"usernames": min_users, "count": min_count},
+            "avg": round(avg, 2)
         }
-        
+    
     def show_graph_with_graphviz(self):
-        """Mostrar grafo con Graphviz (requiere instalación)"""
+        """Mostrar grafo con Graphviz"""
         try:
             import graphviz
             import tempfile
@@ -135,11 +132,9 @@ class SocialGraph:
             dot.attr(rankdir='LR')
             dot.attr('node', shape='circle', style='filled', fillcolor='lightblue')
             
-            # Agregar nodos
             for user in self.adj:
                 dot.node(user)
             
-            # Agregar conexiones (sin duplicados)
             seen_edges = set()
             for user in self.adj:
                 for friend in self.adj[user]:
@@ -147,7 +142,6 @@ class SocialGraph:
                         dot.edge(user, friend)
                         seen_edges.add((user, friend))
             
-            # Guardar y mostrar
             output_path = tempfile.mktemp(suffix='.png')
             dot.render(output_path, view=True, cleanup=False)
             
@@ -171,6 +165,5 @@ class SocialGraph:
                     friend_of_friend not in my_friends):
                     suggestions[friend_of_friend] = suggestions.get(friend_of_friend, 0) + 1
         
-        # Ordenar por más común
         sorted_suggestions = sorted(suggestions.items(), key=lambda x: x[1], reverse=True)
         return [user for user, count in sorted_suggestions[:limit]]

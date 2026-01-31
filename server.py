@@ -1,19 +1,16 @@
-# server.py - VERSIÓN CORREGIDA Y SIMPLE
+# server.py - VERSIÓN COMPLETA CORREGIDA CON ESTADÍSTICAS ACTUALIZABLES
 import socket
 import threading
 import json
 import tkinter as tk
 from tkinter import scrolledtext, ttk, messagebox
 from datetime import datetime
-import base64
-from PIL import Image, ImageTk
-import io
-import os
 import hashlib
 
 from core.user_store import UserStore
 from core.social_graph import SocialGraph
 from core.MergeSort import MergeSorter
+from core.Protocol import JsonLineProtocol
 
 HOST = "127.0.0.1"
 PORT = 5000
@@ -28,7 +25,6 @@ class SocialTecServer:
         self._create_sample_data()
         self.create_gui()
         
-        # Iniciar servidor en hilo separado
         server_thread = threading.Thread(target=self.run_server, daemon=True)
         server_thread.start()
         
@@ -38,7 +34,6 @@ class SocialTecServer:
         """Crear datos de ejemplo"""
         print("Inicializando datos de muestra...")
         
-        # Primero crear todos los usuarios
         sample_users = [
             ("ana", "Ana", "Lopez", "", "ana123", "Me encanta viajar ✈️"),
             ("luis", "Luis", "Perez", "", "luis456", "Programador y músico 🎸"),
@@ -50,18 +45,17 @@ class SocialTecServer:
         for user, nom, ape, foto, pwd, bio in sample_users:
             if not self.users.exists(user):
                 print(f"Creando usuario: {user}")
-                # ENVIAMOS LA CONTRASEÑA EN TEXTO PLANO - PASSLIB LA HASHEA
-                ok, err = self.users.register(user, nom, ape, foto, pwd)
+                # Hashear la contraseña de ejemplo
+                password_hash = hashlib.sha256(pwd.encode()).hexdigest()
+                ok, err = self.users.register(user, nom, ape, foto, password_hash)
                 if ok:
                     user_data = self.users.get_profile(user)
                     if user_data:
                         user_data["bio"] = bio
         
-        # Asegurar que todos los usuarios existen en el grafo
         for username in self.users.all_usernames():
             self.graph.ensure_user(username)
         
-        # Crear amistades de ejemplo
         friendships = [
             ("ana", "luis"),
             ("luis", "carlos"),
@@ -105,26 +99,26 @@ class SocialTecServer:
             thread.start()
     
     def handle_client(self, conn, addr):
-        """Manejar cliente conectado"""
+        """Manejar cliente conectado usando Protocol"""
         try:
-            f = conn.makefile("r", encoding="utf-8")
+            protocol = JsonLineProtocol()
             
             while True:
-                line = f.readline()
-                if not line:
-                    break
-                
                 try:
-                    req = json.loads(line)
-                except json.JSONDecodeError:
-                    conn.sendall(b'{"status":"error","msg":"JSON invalido"}\n')
-                    continue
-                
-                with self.lock:
-                    resp = self.handle_request(req)
-                
-                conn.sendall((json.dumps(resp) + "\n").encode())
-        
+                    req = protocol.recv(conn.makefile("r", encoding="utf-8"))
+                    if not req:
+                        break
+                    
+                    with self.lock:
+                        resp = self.handle_request(req)
+                    
+                    protocol.send(conn, resp)
+                    
+                except Exception as e:
+                    error_resp = {"status": "error", "msg": f"Error interno: {str(e)}"}
+                    protocol.send(conn, error_resp)
+                    break
+                    
         except Exception as e:
             print(f"Error con cliente {addr}: {e}")
         finally:
@@ -180,13 +174,13 @@ class SocialTecServer:
             return {"status": "error", "msg": f"Tipo desconocido: {tipo}"}
     
     def handle_register(self, req):
-        """Manejar registro de usuario - PASSLIB HACE EL HASHING"""
+        """Manejar registro de usuario"""
         ok, err = self.users.register(
             req.get("username"),
             req.get("nombre"),
             req.get("apellido"),
             req.get("foto", ""),
-            req.get("password")  # Passlib hashea esta contraseña
+            req.get("password")  # Ya viene hasheado del cliente
         )
         if ok:
             self.graph.ensure_user(req.get("username"))
@@ -194,13 +188,16 @@ class SocialTecServer:
         return {"status": "error", "msg": err}
     
     def handle_login(self, req):
-        """Manejar inicio de sesión - PASSLIB VERIFICA"""
-        ok, err = self.users.login(req.get("username"), req.get("password"))
+        """Manejar inicio de sesión - VERIFICACIÓN CON PASSLIB"""
+        username = req.get("username")
+        password_hash = req.get("password")  # Recibir hash del cliente
+        
+        ok, err = self.users.login(username, password_hash)
         if ok:
-            user_data = self.users.get_profile(req.get("username"))
+            user_data = self.users.get_profile(username)
             return {
                 "status": "ok", 
-                "username": req.get("username"),
+                "username": username,
                 "nombre": user_data["nombre"],
                 "apellido": user_data["apellido"],
                 "foto": user_data["foto"],
@@ -208,7 +205,6 @@ class SocialTecServer:
             }
         return {"status": "error", "msg": err}
     
-    # EL RESTO DE LAS FUNCIONES SE MANTIENEN IGUAL
     def handle_get_profile(self, req):
         """Obtener perfil de usuario"""
         username = req.get("username")
@@ -337,8 +333,8 @@ class SocialTecServer:
         return {"status": "ok", "exists": True, "path": path}
     
     def handle_get_stats(self, req):
-        """Obtener estadísticas"""
-        stats = self.graph.stats(self.users.all_usernames())
+        """Obtener estadísticas - VERSIÓN CORREGIDA"""
+        stats = self.graph.stats()  # ¡LLAMADA SIN PARÁMETROS!
         return {"status": "ok", "stats": stats}
     
     def handle_get_all_users(self, req):
@@ -354,7 +350,6 @@ class SocialTecServer:
             })
         return {"status": "ok", "users": users}
     
-    # LA GUI DEL SERVIDOR SE MANTIENE IGUAL
     def create_gui(self):
         """Crear interfaz gráfica del servidor"""
         self.root = tk.Tk()
@@ -379,11 +374,28 @@ class SocialTecServer:
         self.tab_path = tk.Frame(self.notebook)
         self.notebook.add(self.tab_path, text="🔍 Buscar Camino")
         
+        # Cargar contenido de pestañas
         self.load_dashboard()
         self.load_graph_tab()
         self.load_users_tab()
         self.load_stats_tab()
         self.load_path_tab()
+        
+        # Enlazar el evento de cambio de pestaña
+        self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
+    
+    def on_tab_changed(self, event):
+        """Evento al cambiar de pestaña"""
+        selected_tab = self.notebook.select()
+        tab_name = self.notebook.tab(selected_tab, "text")
+        
+        if tab_name == "📈 Estadísticas":
+            self.refresh_stats()
+        elif tab_name == "👥 Usuarios":
+            self.refresh_users_list()
+        elif tab_name == "🕸️ Grafo Social":
+            self.show_graph_text()
+        # Puedes añadir más pestañas si es necesario
     
     def load_dashboard(self):
         """Cargar dashboard"""
@@ -515,34 +527,89 @@ class SocialTecServer:
             ))
     
     def load_stats_tab(self):
-        """Cargar pestaña de estadísticas"""
+        """Cargar pestaña de estadísticas - VERSIÓN MEJORADA CON ACTUALIZACIÓN"""
+        # Limpiar el tab
         for widget in self.tab_stats.winfo_children():
             widget.destroy()
+
+        # Frame para el título y botón de actualización
+        header_frame = tk.Frame(self.tab_stats)
+        header_frame.pack(fill="x", padx=20, pady=10)
+
+        tk.Label(header_frame, text="Estadísticas Detalladas",
+                font=("Arial", 16, "bold")).pack(side="left")
+
+        # Botón de actualizar
+        tk.Button(header_frame, text="🔄 Actualizar", font=("Arial", 10),
+                  command=self.refresh_stats).pack(side="right", padx=10)
+
+        # Área de texto para mostrar las estadísticas
+        self.stats_text = scrolledtext.ScrolledText(self.tab_stats, height=20, width=70)
+        self.stats_text.pack(fill="both", expand=True, padx=20, pady=10)
+
+        # Cargar las estadísticas
+        self.refresh_stats()
+    
+    def refresh_stats(self):
+        """Actualizar el contenido de las estadísticas"""
+        stats = self.graph.stats()
         
-        tk.Label(self.tab_stats, text="Estadísticas Detalladas",
-                font=("Arial", 16, "bold")).pack(pady=20)
+        self.stats_text.delete("1.0", tk.END)
         
-        stats = self.graph.stats(self.users.all_usernames())
+        # Verificar si hay datos
+        if not stats["max"]["usernames"]:
+            self.stats_text.insert("1.0", "No hay suficientes datos para estadísticas")
+            return
         
-        stats_text = scrolledtext.ScrolledText(self.tab_stats, height=20, width=70)
-        stats_text.pack(fill="both", expand=True, padx=20, pady=10)
+        # Construir información de estadísticas
+        info = "📊 ESTADÍSTICAS DE LA RED SOCIAL\n"
+        info += "=" * 40 + "\n\n"
         
-        if stats["max"]:
-            info = f"""
-            📊 ESTADÍSTICAS DE LA RED SOCIAL
-            
-            👑 USUARIO MÁS POPULAR:
-               {stats['max']['username']} con {stats['max']['count']} amigos
-            
-            🐣 USUARIO MÁS SOLITARIO:
-               {stats['min']['username']} con {stats['min']['count']} amigos
-            
-            📈 PROMEDIO DE AMIGOS:
-               {stats['avg']:.2f} amigos por usuario
-            """
-            stats_text.insert("1.0", info)
+        # Usuario(s) más popular(es)
+        info += "👑 USUARIO(S) MÁS POPULAR(ES):\n"
+        if stats['max']['usernames']:
+            for i, username in enumerate(stats['max']['usernames'], 1):
+                info += f"   {i}. {username} - {stats['max']['count']} amigos\n"
         else:
-            stats_text.insert("1.0", "No hay suficientes datos para estadísticas")
+            info += "   Ningún usuario tiene amigos\n"
+        
+        info += "\n"
+        
+        # Usuario(s) más solitario(s)
+        info += "🐣 USUARIO(S) MÁS SOLITARIO(S):\n"
+        if stats['min']['usernames']:
+            for i, username in enumerate(stats['min']['usernames'], 1):
+                info += f"   {i}. {username} - {stats['min']['count']} amigos\n"
+        else:
+            info += "   Todos los usuarios tienen amigos\n"
+        
+        info += "\n"
+        
+        # Promedio
+        info += f"📈 PROMEDIO DE AMIGOS:\n"
+        info += f"   {stats['avg']:.2f} amigos por usuario\n"
+        
+        info += "\n"
+        
+        # Distribución de amigos (información adicional)
+        info += "👥 DISTRIBUCIÓN DE AMISTADES:\n"
+        users_by_friends = {}
+        for username in self.users.all_usernames():
+            count = len(self.graph.friends_of(username))
+            users_by_friends[count] = users_by_friends.get(count, 0) + 1
+        
+        # Ordenar de mayor a menor cantidad de amigos
+        for count in sorted(users_by_friends.keys(), reverse=True):
+            if count > 0:
+                info += f"   • {count} amigos: {users_by_friends[count]} usuario(s)\n"
+        
+        # Usuarios sin amigos
+        info += f"   • 0 amigos: {users_by_friends.get(0, 0)} usuario(s)\n"
+        
+        # Total de usuarios
+        info += f"\n📋 TOTAL DE USUARIOS: {len(self.users.all_usernames())}\n"
+        
+        self.stats_text.insert("1.0", info)
     
     def load_path_tab(self):
         """Cargar pestaña para buscar camino"""
